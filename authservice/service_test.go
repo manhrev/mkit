@@ -156,6 +156,30 @@ func TestLoginBadPassword(t *testing.T) {
 	}
 }
 
+func TestLoginUser(t *testing.T) {
+	s := testAuthService(t)
+	ctx := context.Background()
+
+	access, refresh, err := s.LoginUser(ctx, "user-alice")
+	if err != nil {
+		t.Fatalf("LoginUser: %v", err)
+	}
+
+	claims, err := s.ValidateAccessToken(ctx, access)
+	if err != nil {
+		t.Fatalf("ValidateAccessToken: %v", err)
+	}
+
+	if claims.Subject != "user-alice" || len(claims.Roles) != 1 || claims.Roles[0] != "admin" {
+		t.Errorf("claims = %q %v, want user-alice [admin]", claims.Subject, claims.Roles)
+	}
+
+	// plain user token, so it refreshes via Refresh (not RefreshForClient)
+	if _, _, err := s.Refresh(ctx, refresh); err != nil {
+		t.Fatalf("Refresh: %v", err)
+	}
+}
+
 func TestRefreshRotates(t *testing.T) {
 	s := testAuthService(t)
 	ctx := context.Background()

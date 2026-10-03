@@ -57,6 +57,14 @@ func (s *Service) Login(ctx context.Context, username, password string) (access,
 		return "", "", serviceerr.NewUnauthenticated(err).SetMessage("Invalid username or password.")
 	}
 
+	return s.LoginUser(ctx, userID)
+}
+
+// LoginUser issues a plain user access+refresh pair for a userID the caller
+// has already authenticated some other way (e.g. a verified Google ID
+// token), so there's no password for CredentialVerifier to check. The
+// caller owns that verification: this trusts userID as-is.
+func (s *Service) LoginUser(ctx context.Context, userID string) (access, refresh string, err error) {
 	roles, err := s.users.RolesByUserID(ctx, userID)
 	if err != nil {
 		return "", "", serviceerr.NewInternal(err)
