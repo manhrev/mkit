@@ -46,7 +46,7 @@ func NewError(ctx context.Context, err error) error {
 
 	sErr, isServiceErr := errors.AsType[*serviceerr.Error](err)
 
-	model := toHumaErrorModel(err, sErr, isServiceErr)
+	model := toHumaErrorModel(sErr, isServiceErr)
 
 	if model.Status >= http.StatusInternalServerError {
 		args := []any{"error", err}
@@ -64,16 +64,18 @@ func NewError(ctx context.Context, err error) error {
 	return &ErrorOutput{Meta: meta, ErrorModel: model}
 }
 
-// toHumaErrorModel converts err into huma's own ErrorModel (exported,
+// toHumaErrorModel converts the error into huma's own ErrorModel (exported,
 // properly json-tagged) so its message/details are actually serialized.
 // *serviceerr.Error carries a real status/message/details; anything else
-// falls back to a plain 500 with err's own message.
-func toHumaErrorModel(err error, sErr *serviceerr.Error, isServiceErr bool) *huma.ErrorModel {
+// falls back to a plain 500 with a generic message. err itself (e.g. a
+// driver error naming tables and constraints) only goes to the log, never
+// to the client.
+func toHumaErrorModel(sErr *serviceerr.Error, isServiceErr bool) *huma.ErrorModel {
 	if !isServiceErr {
 		return &huma.ErrorModel{
 			Title:  http.StatusText(http.StatusInternalServerError),
 			Status: http.StatusInternalServerError,
-			Detail: err.Error(),
+			Detail: "Internal server error.",
 		}
 	}
 
