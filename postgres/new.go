@@ -15,6 +15,8 @@ import (
 
 	"github.com/exaring/otelpgx"
 	"github.com/golang-migrate/migrate/v4"
+	"github.com/golang-migrate/migrate/v4/database"
+	"github.com/golang-migrate/migrate/v4/database/cockroachdb"
 	migratepgx "github.com/golang-migrate/migrate/v4/database/pgx/v5"
 	_ "github.com/golang-migrate/migrate/v4/source/file"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -68,7 +70,7 @@ func New(ctx context.Context, appCfg *config.App, logger *slog.Logger) (*pgxpool
 	}
 
 	if cfg.IsMigrateSchema {
-		if err := Migrate(pool, DefaultMigrationsPath, logger); err != nil {
+		if err := Migrate(pool, DefaultMigrationsPath, cfg.IsCockroach, logger); err != nil {
 			pool.Close()
 			return nil, fmt.Errorf("postgres: error migrating database: %w", err)
 		}
@@ -79,19 +81,29 @@ func New(ctx context.Context, appCfg *config.App, logger *slog.Logger) (*pgxpool
 
 // Migrate runs schema migrations found under migrationsPath against pool.
 // It opens a database/sql handle from the pool (golang-migrate's driver API
-// requires one), scoped to this call only.
-func Migrate(pool *pgxpool.Pool, migrationsPath string, logger *slog.Logger) error {
-	logger.Info("postgres: running migrations", "path", migrationsPath)
+// requires one), scoped to this call only. cockroach picks the cockroachdb
+// driver; its lock fails fast (database.ErrLocked) instead of waiting, and a
+// crash mid-migration leaves the row in schema_lock until deleted by hand.
+func Migrate(pool *pgxpool.Pool, migrationsPath string, cockroach bool, logger *slog.Logger) error {
+	logger.Info("postgres: running migrations", "path", migrationsPath, "cockroach", cockroach)
 
 	db := stdlib.OpenDBFromPool(pool)
 	defer db.Close()
 
-	driver, err := migratepgx.WithInstance(db, &migratepgx.Config{})
+	var (
+		driver database.Driver
+		err    error
+	)
+	if cockroach {
+		driver, err = cockroachdb.WithInstance(db, &cockroachdb.Config{})
+	} else {
+		driver, err = migratepgx.WithInstance(db, &migratepgx.Config{})
+	}
 	if err != nil {
 		return fmt.Errorf("postgres: init migrate driver: %w", err)
 	}
 
-	m, err := migrate.NewWithDatabaseInstance("file://"+migrationsPath, "pgx", driver)
+	m, err := migrate.NewWithDatabaseInstance("file://"+migrationsPath, "postgres", driver)
 	if err != nil {
 		return fmt.Errorf("postgres: init migrate instance: %w", err)
 	}

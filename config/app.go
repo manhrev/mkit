@@ -23,8 +23,12 @@ type App struct {
 type Postgres struct {
 	ConnectionParams *PostgresConnectionParams `validate:"required"`
 	IsMigrateSchema  bool
-	MaxOpenConn      int `validate:"required,gt=0"`
-	MaxIdleConn      int `validate:"required,gt=0"`
+	// IsCockroach migrates with golang-migrate's cockroachdb driver (lock
+	// row in schema_lock): CockroachDB has no pg_advisory_lock, which the
+	// default pgx driver needs.
+	IsCockroach bool
+	MaxOpenConn int `validate:"required,gt=0"`
+	MaxIdleConn int `validate:"required,gt=0"`
 }
 
 type PostgresConnectionParams struct {
