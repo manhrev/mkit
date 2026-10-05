@@ -49,7 +49,25 @@ func newHandler(w io.Writer, level slog.Level) slog.Handler {
 		// (level + keys) so key=value pairs are easy to pick out at a glance.
 		return tint.NewTextHandler(w, &tint.Options{Level: level, TimeFormat: "15:04:05"})
 	}
-	return slog.NewJSONHandler(w, &slog.HandlerOptions{Level: level})
+	return slog.NewJSONHandler(w, &slog.HandlerOptions{Level: level, ReplaceAttr: gcpAttr})
+}
+
+// gcpAttr renames slog's level/msg to the severity/message keys Cloud
+// Logging parses from structured stdout; otherwise every line is DEFAULT.
+func gcpAttr(groups []string, a slog.Attr) slog.Attr {
+	if len(groups) > 0 {
+		return a
+	}
+	switch a.Key {
+	case slog.LevelKey:
+		a.Key = "severity"
+		if lvl, ok := a.Value.Any().(slog.Level); ok && lvl >= slog.LevelWarn && lvl < slog.LevelError {
+			a.Value = slog.StringValue("WARNING") // GCP has no "WARN"
+		}
+	case slog.MessageKey:
+		a.Key = "message"
+	}
+	return a
 }
 
 func isTerminal(w io.Writer) bool {
