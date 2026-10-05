@@ -4,6 +4,7 @@ package middleware
 
 import (
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"runtime/debug"
@@ -44,8 +45,7 @@ func Metadata(version string) func(http.Handler) http.Handler {
 }
 
 // Logger logs one line per request (method, path, status, duration,
-// request ID if Metadata ran first) and an extra error-level line for 5xx
-// responses. Put it after Metadata in the chain so RequestID is available.
+// request ID if Metadata ran first), at error level for 5xx responses. Put it after Metadata in the chain so RequestID is available.
 func Logger(logger *slog.Logger) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -56,19 +56,22 @@ func Logger(logger *slog.Logger) func(http.Handler) http.Handler {
 			next.ServeHTTP(sw, r)
 
 			meta, _ := response.MetaFromContext(r.Context())
-			args := []any{
+			duration := time.Since(start)
+			level := slog.LevelInfo
+			if sw.status >= 500 {
+				level = slog.LevelError
+			}
+
+			// Message carries the summary (what log viewers show per row);
+			// attrs stay for filtering.
+			logger.Log(r.Context(), level,
+				fmt.Sprintf("%s %s %d %s", r.Method, r.URL.Path, sw.status, duration.Round(time.Microsecond)),
 				"method", r.Method,
 				"path", r.URL.Path,
 				"status", sw.status,
-				"duration", time.Since(start),
+				"durationMs", duration.Milliseconds(),
 				"requestId", meta.RequestID,
-			}
-
-			if sw.status >= 500 {
-				logger.ErrorContext(r.Context(), "request failed", args...)
-			} else {
-				logger.InfoContext(r.Context(), "request", args...)
-			}
+			)
 		})
 	}
 }
