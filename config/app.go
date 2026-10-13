@@ -61,14 +61,15 @@ type HTTP struct {
 }
 
 type Tracing struct {
-	ServiceName   string
-	Enabled       bool // master switch; false disables all signals below
-	CollectorHost string
-	CollectorPort int
-	Secure        bool
-	Trace         bool
-	Metric        bool
-	Log           bool
+	ServiceName string
+	Enabled     bool // master switch; false disables all signals below
+	// Endpoint is the OTLP/gRPC collector URL for all signals; the scheme
+	// picks TLS: http://localhost:4317 (plaintext) or https://host:443.
+	Endpoint string
+	Headers  map[string]string // sent on every export, e.g. Authorization
+	Trace    bool
+	Metric   bool
+	Log      bool
 }
 
 type Log struct {

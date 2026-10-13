@@ -18,7 +18,6 @@ import (
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
-	"google.golang.org/grpc/credentials"
 )
 
 type Service struct {
@@ -40,9 +39,8 @@ func NewService(ctx context.Context, appCfg *config.App) (*Service, error) {
 	}
 
 	var (
-		collectorUrl = fmt.Sprintf("%s:%d", cfg.CollectorHost, cfg.CollectorPort)
-		serviceName  = cfg.ServiceName
-		err          error
+		serviceName = cfg.ServiceName
+		err         error
 	)
 
 	s.serviceName = serviceName
@@ -59,7 +57,7 @@ func NewService(ctx context.Context, appCfg *config.App) (*Service, error) {
 	}
 
 	if cfg.Trace {
-		s.tracerProvider, err = initTracer(ctx, collectorUrl, s.resources, cfg.Secure)
+		s.tracerProvider, err = initTracer(ctx, cfg, s.resources)
 		if err != nil {
 			return nil, fmt.Errorf("cant init tracer: %w", err)
 		}
@@ -71,14 +69,14 @@ func NewService(ctx context.Context, appCfg *config.App) (*Service, error) {
 	}
 
 	if cfg.Metric {
-		s.meterProvider, err = initMetrics(ctx, collectorUrl, s.resources, cfg.Secure)
+		s.meterProvider, err = initMetrics(ctx, cfg, s.resources)
 		if err != nil {
 			return nil, fmt.Errorf("cant init metric: %w", err)
 		}
 	}
 
 	if cfg.Log {
-		s.loggerProvider, err = initLogCollector(ctx, collectorUrl, s.resources, cfg.Secure)
+		s.loggerProvider, err = initLogCollector(ctx, cfg, s.resources)
 		if err != nil {
 			return nil, fmt.Errorf("cant init log collector: %w", err)
 		}
@@ -110,21 +108,16 @@ func (s *Service) Stop(ctx context.Context) error {
 	return nil
 }
 
-func secureOption(isSecure bool) otlptracegrpc.Option {
-	if isSecure {
-		return otlptracegrpc.WithTLSCredentials(credentials.NewClientTLSFromCert(nil, ""))
-	}
-	return otlptracegrpc.WithInsecure()
-}
-
+// All signals export over OTLP/gRPC to cfg.Endpoint; its scheme picks TLS
+// (https) or plaintext (http).
 func initTracer(
-	ctx context.Context, collectorURL string, resources *resource.Resource, isSecure bool,
+	ctx context.Context, cfg config.Tracing, resources *resource.Resource,
 ) (*sdktrace.TracerProvider, error) {
 	exporter, err := otlptrace.New(
 		ctx,
 		otlptracegrpc.NewClient(
-			secureOption(isSecure),
-			otlptracegrpc.WithEndpoint(collectorURL),
+			otlptracegrpc.WithEndpointURL(cfg.Endpoint),
+			otlptracegrpc.WithHeaders(cfg.Headers),
 		),
 	)
 	if err != nil {
@@ -142,19 +135,12 @@ func initTracer(
 }
 
 func initLogCollector(
-	ctx context.Context, collectorURL string, resources *resource.Resource, isSecure bool,
+	ctx context.Context, cfg config.Tracing, resources *resource.Resource,
 ) (*otellog.LoggerProvider, error) {
-	var opt otlploggrpc.Option
-	if isSecure {
-		opt = otlploggrpc.WithTLSCredentials(credentials.NewClientTLSFromCert(nil, ""))
-	} else {
-		opt = otlploggrpc.WithInsecure()
-	}
-
 	logExporter, err := otlploggrpc.New(
 		ctx,
-		otlploggrpc.WithEndpoint(collectorURL),
-		opt,
+		otlploggrpc.WithEndpointURL(cfg.Endpoint),
+		otlploggrpc.WithHeaders(cfg.Headers),
 	)
 	if err != nil {
 		return nil, err
@@ -177,18 +163,11 @@ func (s *Service) Handler() slog.Handler {
 	return otelslog.NewHandler(s.serviceName, otelslog.WithLoggerProvider(s.loggerProvider))
 }
 
-func initMetrics(ctx context.Context, collectorURL string, resources *resource.Resource, isSecure bool) (*sdkmetric.MeterProvider, error) {
-	var opt otlpmetricgrpc.Option
-	if isSecure {
-		opt = otlpmetricgrpc.WithTLSCredentials(credentials.NewClientTLSFromCert(nil, ""))
-	} else {
-		opt = otlpmetricgrpc.WithInsecure()
-	}
-
+func initMetrics(ctx context.Context, cfg config.Tracing, resources *resource.Resource) (*sdkmetric.MeterProvider, error) {
 	metricExporter, err := otlpmetricgrpc.New(
 		ctx,
-		otlpmetricgrpc.WithEndpoint(collectorURL),
-		opt,
+		otlpmetricgrpc.WithEndpointURL(cfg.Endpoint),
+		otlpmetricgrpc.WithHeaders(cfg.Headers),
 	)
 	if err != nil {
 		return nil, err
