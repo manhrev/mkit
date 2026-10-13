@@ -27,7 +27,8 @@ import (
 const DefaultMigrationsPath = "migrations"
 
 // New connects to Postgres via pgxpool and, if cfg.IsMigrateSchema is set,
-// runs schema migrations before returning.
+// runs schema migrations before returning. With cfg.SkipPing it skips the
+// startup ping (migrations still connect).
 func New(ctx context.Context, appCfg *config.App, logger *slog.Logger) (*pgxpool.Pool, error) {
 	cfg := appCfg.Postgres
 	if cfg == nil || cfg.ConnectionParams == nil {
@@ -64,9 +65,11 @@ func New(ctx context.Context, appCfg *config.App, logger *slog.Logger) (*pgxpool
 		return nil, fmt.Errorf("postgres: failed to create connection pool: %w", err)
 	}
 
-	if err := pool.Ping(ctx); err != nil {
-		pool.Close()
-		return nil, fmt.Errorf("postgres: failed to connect: %w", err)
+	if !cfg.SkipPing {
+		if err := pool.Ping(ctx); err != nil {
+			pool.Close()
+			return nil, fmt.Errorf("postgres: failed to connect: %w", err)
+		}
 	}
 
 	if cfg.IsMigrateSchema {

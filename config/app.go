@@ -27,6 +27,10 @@ type Postgres struct {
 	// row in schema_lock): CockroachDB has no pg_advisory_lock, which the
 	// default pgx driver needs.
 	IsCockroach bool
+	// SkipPing makes New return without connecting, so a caller can bind its
+	// HTTP port first and ping later. The caller must then ping itself and
+	// treat failure as fatal; otherwise a bad DSN only shows on first query.
+	SkipPing    bool
 	MaxOpenConn int `validate:"required,gt=0"`
 	MaxIdleConn int `validate:"required,gt=0"`
 }
