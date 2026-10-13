@@ -13,7 +13,6 @@ import (
 	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetricgrpc"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
-	"go.opentelemetry.io/otel/propagation"
 	otellog "go.opentelemetry.io/otel/sdk/log"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/resource"
@@ -65,7 +64,7 @@ func NewService(ctx context.Context, appCfg *config.App) (*Service, error) {
 		// Required for trace context (traceparent) to propagate across
 		// service boundaries via HTTP/gRPC headers — without this, spans on
 		// either side of a network call are never linked into the same trace.
-		otel.SetTextMapPropagator(propagation.TraceContext{})
+		otel.SetTextMapPropagator(traceContext{})
 	}
 
 	if cfg.Metric {
@@ -126,6 +125,7 @@ func initTracer(
 
 	tp := sdktrace.NewTracerProvider(
 		sdktrace.WithSampler(skipSampler{}),
+		sdktrace.WithIDGenerator(idGenerator{}),
 		sdktrace.WithBatcher(exporter),
 		sdktrace.WithResource(resources),
 	)

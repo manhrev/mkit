@@ -6,7 +6,10 @@ import "context"
 // collide with keys from other packages using the same string value.
 type ctxKey int
 
-const skipTraceContextKey ctxKey = iota
+const (
+	skipTraceContextKey ctxKey = iota
+	remoteTraceIDKey
+)
 
 func WithSkipTrace(ctx context.Context) context.Context {
 	return context.WithValue(ctx, skipTraceContextKey, true)
