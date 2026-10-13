@@ -45,7 +45,7 @@ func Metadata(version string) func(http.Handler) http.Handler {
 }
 
 // Logger logs one line per request (method, path, status, duration,
-// request ID if Metadata ran first), at error level for 5xx responses. Put it after Metadata in the chain so RequestID is available.
+// request and trace IDs if Metadata ran first), at error level for 5xx responses. Put it after Metadata in the chain so RequestID is available.
 func Logger(logger *slog.Logger) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -71,6 +71,7 @@ func Logger(logger *slog.Logger) func(http.Handler) http.Handler {
 				"status", sw.status,
 				"durationMs", duration.Milliseconds(),
 				"requestId", meta.RequestID,
+				"traceId", meta.TraceID,
 			)
 		})
 	}
