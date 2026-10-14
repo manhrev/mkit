@@ -5,11 +5,12 @@ import (
 	"time"
 )
 
-// Response is the result of an executed Request. Body holds whatever value
-// was passed to SetResult, decoded in place; it's nil if SetResult was never
-// called.
-type Response struct {
-	Body        any
+// Response is the result of an executed Request. Body holds a 2xx JSON
+// response decoded into T (zero value otherwise). Raw holds the body bytes
+// for any status; RawResponse.Body is already read and closed.
+type Response[T any] struct {
+	Body        T
+	Raw         []byte
 	StatusCode  int
 	RawResponse *http.Response
 }
@@ -17,14 +18,13 @@ type Response struct {
 // Request is a fluent builder for a single outbound HTTP call. Build one via
 // Client.Req, chain SetX calls, then execute with Get or Post.
 type Request struct {
-	client       *Client
-	url          string
-	headers      http.Header
-	queries      map[string]string
-	requestBody  any
-	responseBody any
-	timeout      time.Duration
-	retryCount   int
+	client      *Client
+	url         string
+	headers     http.Header
+	queries     map[string]string
+	requestBody any
+	timeout     time.Duration
+	retryCount  int
 }
 
 // SetBody marshals body as the JSON request body and sets Content-Type.
@@ -74,14 +74,6 @@ func (r *Request) SetTimeout(timeout time.Duration) *Request {
 // retries — it does not mean "unlimited" (unlike retry-go's own default).
 func (r *Request) SetRetry(retryCount int) *Request {
 	r.retryCount = retryCount
-
-	return r
-}
-
-// SetResult sets the destination that a successful 2xx JSON response body
-// is decoded into.
-func (r *Request) SetResult(body any) *Request {
-	r.responseBody = body
 
 	return r
 }

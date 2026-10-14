@@ -1,11 +1,14 @@
 // Package httpclient is a fluent outbound HTTP client built on
 // github.com/avast/retry-go/v4: Client.Req() starts a builder, chained
-// SetX calls configure it, and Get/Post execute it.
+// SetX calls configure it, and Get[T]/Post[T] execute it and decode the
+// JSON response into T. Requests are traced via otelhttp.
 package httpclient
 
 import (
 	"net/http"
 	"time"
+
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
 
 const (
@@ -39,7 +42,9 @@ func NewClient(cfg *Config) *Client {
 
 	return &Client{
 		client: &http.Client{
-			Transport: transport,
+			// one client span per attempt, with traceparent injected via the
+			// global propagator (no-op until tracing.NewService sets it)
+			Transport: otelhttp.NewTransport(transport),
 		},
 		config: cfg,
 	}
@@ -48,13 +53,12 @@ func NewClient(cfg *Config) *Client {
 // Req starts a new request builder seeded with this client's defaults.
 func (c *Client) Req() *Request {
 	return &Request{
-		headers:      make(map[string][]string),
-		queries:      make(map[string]string),
-		client:       c,
-		timeout:      c.config.DefaultTimeout,
-		retryCount:   c.config.DefaultRetryCount,
-		requestBody:  nil,
-		responseBody: nil,
+		headers:     make(map[string][]string),
+		queries:     make(map[string]string),
+		client:      c,
+		timeout:     c.config.DefaultTimeout,
+		retryCount:  c.config.DefaultRetryCount,
+		requestBody: nil,
 	}
 }
 
