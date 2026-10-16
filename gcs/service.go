@@ -9,10 +9,13 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
 	"cloud.google.com/go/storage"
+	"google.golang.org/api/googleapi"
 	"google.golang.org/api/iterator"
 	"google.golang.org/api/option"
 
@@ -23,10 +26,15 @@ import (
 // callers check one error whichever object store they use.
 var ErrObjectNotFound = errors.New("gcs: object not found")
 
+// ErrObjectExists is returned by CopyObject with ifNotExists when the
+// destination is already there.
+var ErrObjectExists = errors.New("gcs: object already exists")
+
 type Service struct {
 	client        *storage.Client
 	logger        *slog.Logger
 	defaultBucket string
+	signerEmail   string
 }
 
 // UploadInfo describes a stored object.
@@ -56,7 +64,7 @@ func New(ctx context.Context, appCfg *config.App, logger *slog.Logger) (*Service
 	}
 
 	logger.Info("gcs: client ready", "bucket", cfg.BucketName)
-	return &Service{client: client, logger: logger, defaultBucket: cfg.BucketName}, nil
+	return &Service{client: client, logger: logger, defaultBucket: cfg.BucketName, signerEmail: cfg.SignerEmail}, nil
 }
 
 // Close releases the client's connections.
@@ -164,6 +172,100 @@ func (s *Service) GetObjectWithBucket(ctx context.Context, bucketName, objectNam
 // GetObject opens objectName in the default bucket. See GetObjectWithBucket.
 func (s *Service) GetObject(ctx context.Context, objectName string) (*storage.Reader, error) {
 	return s.GetObjectWithBucket(ctx, s.defaultBucket, objectName)
+}
+
+// SignedPutURLWithBucket is a V4 signed URL that lets anyone PUT objectName
+// into bucketName until expires passes. The client must send Content-Type:
+// contentType (when set) and every header in headers ("Name:value", e.g.
+// "x-goog-content-length-range:0,1048576") exactly, or GCS rejects the
+// upload with SignatureDoesNotMatch.
+func (s *Service) SignedPutURLWithBucket(bucketName, objectName, contentType string, expires time.Duration, headers []string) (string, error) {
+	u, err := s.client.Bucket(bucketName).SignedURL(objectName, &storage.SignedURLOptions{
+		GoogleAccessID: s.signerEmail,
+		Scheme:         storage.SigningSchemeV4,
+		Method:         http.MethodPut,
+		Expires:        time.Now().Add(expires),
+		ContentType:    contentType,
+		Headers:        headers,
+	})
+	if err != nil {
+		return "", fmt.Errorf("gcs: sign put %s: %w", objectName, err)
+	}
+	return u, nil
+}
+
+// SignedPutURL signs a PUT for objectName in the default bucket. See SignedPutURLWithBucket.
+func (s *Service) SignedPutURL(objectName, contentType string, expires time.Duration, headers []string) (string, error) {
+	return s.SignedPutURLWithBucket(s.defaultBucket, objectName, contentType, expires, headers)
+}
+
+// StatObjectWithBucket returns objectName's attributes, or ErrObjectNotFound.
+func (s *Service) StatObjectWithBucket(ctx context.Context, bucketName, objectName string) (*storage.ObjectAttrs, error) {
+	attrs, err := s.client.Bucket(bucketName).Object(objectName).Attrs(ctx)
+	if errors.Is(err, storage.ErrObjectNotExist) {
+		return nil, ErrObjectNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("gcs: stat object %s: %w", objectName, err)
+	}
+	return attrs, nil
+}
+
+// StatObject returns objectName's attributes in the default bucket.
+func (s *Service) StatObject(ctx context.Context, objectName string) (*storage.ObjectAttrs, error) {
+	return s.StatObjectWithBucket(ctx, s.defaultBucket, objectName)
+}
+
+// GetObjectRangeWithBucket opens length bytes of objectName from offset
+// (length -1 = to the end); the caller closes the reader. A plain reader,
+// so callers can fake it; StatObject has the attributes.
+func (s *Service) GetObjectRangeWithBucket(ctx context.Context, bucketName, objectName string, offset, length int64) (io.ReadCloser, error) {
+	r, err := s.client.Bucket(bucketName).Object(objectName).NewRangeReader(ctx, offset, length)
+	if errors.Is(err, storage.ErrObjectNotExist) {
+		return nil, ErrObjectNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("gcs: get object %s: %w", objectName, err)
+	}
+	return r, nil
+}
+
+// GetObjectRange opens part of objectName in the default bucket. See GetObjectRangeWithBucket.
+func (s *Service) GetObjectRange(ctx context.Context, objectName string, offset, length int64) (io.ReadCloser, error) {
+	return s.GetObjectRangeWithBucket(ctx, s.defaultBucket, objectName, offset, length)
+}
+
+// CopyObjectWithBucket copies src to dst inside bucketName, setting dst's
+// content type and cache control (empty = keep src's). With ifNotExists the
+// copy fails with ErrObjectExists when dst is already there, so it needs
+// only object create permission, never overwrite.
+func (s *Service) CopyObjectWithBucket(
+	ctx context.Context, bucketName, src, dst, contentType, cacheControl string, ifNotExists bool,
+) (UploadInfo, error) {
+	bucket := s.client.Bucket(bucketName)
+	dstObj := bucket.Object(dst)
+	if ifNotExists {
+		dstObj = dstObj.If(storage.Conditions{DoesNotExist: true})
+	}
+	c := dstObj.CopierFrom(bucket.Object(src))
+	c.ContentType = contentType
+	c.CacheControl = cacheControl
+	attrs, err := c.Run(ctx)
+	if e, ok := errors.AsType[*googleapi.Error](err); ok && e.Code == http.StatusPreconditionFailed {
+		return UploadInfo{}, ErrObjectExists
+	}
+	if errors.Is(err, storage.ErrObjectNotExist) {
+		return UploadInfo{}, ErrObjectNotFound
+	}
+	if err != nil {
+		return UploadInfo{}, fmt.Errorf("gcs: copy %s to %s: %w", src, dst, err)
+	}
+	return UploadInfo{Bucket: bucketName, Name: attrs.Name, Size: attrs.Size, ContentType: attrs.ContentType}, nil
+}
+
+// CopyObject copies src to dst in the default bucket. See CopyObjectWithBucket.
+func (s *Service) CopyObject(ctx context.Context, src, dst, contentType, cacheControl string, ifNotExists bool) (UploadInfo, error) {
+	return s.CopyObjectWithBucket(ctx, s.defaultBucket, src, dst, contentType, cacheControl, ifNotExists)
 }
 
 // PublicURLWithBucket is objectName's storage.googleapis.com URL. It only

@@ -103,6 +103,11 @@ type Minio struct {
 type GCS struct {
 	BucketName      string `validate:"required"`
 	CredentialsFile string
+	// SignerEmail is the service account signed URLs are signed as, through
+	// the IAM Credentials signBlob API (needs iam.serviceAccounts.signBlob on
+	// it). Empty = detect it from the credentials, which works with a key
+	// file or on Cloud Run/GCE, not with user ADC.
+	SignerEmail string
 }
 
 type RabbitMQ struct {
