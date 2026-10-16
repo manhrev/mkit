@@ -16,6 +16,7 @@ type App struct {
 	Log         *Log
 	Tracing     Tracing
 	Minio       *Minio
+	GCS         *GCS
 	RabbitMQ    *RabbitMQ
 	JWT         *JWT
 }
@@ -93,6 +94,15 @@ type Minio struct {
 	SecretKey  string `validate:"required"`
 	BucketName string `validate:"required"`
 	SSLEnabled bool
+}
+
+// GCS is a Google Cloud Storage default bucket. Credentials come from
+// CredentialsFile when set, else Application Default Credentials (the
+// runtime service account on Cloud Run, `gcloud auth application-default
+// login` locally).
+type GCS struct {
+	BucketName      string `validate:"required"`
+	CredentialsFile string
 }
 
 type RabbitMQ struct {
