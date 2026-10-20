@@ -115,6 +115,8 @@ func Migrate(pool *pgxpool.Pool, migrationsPath string, cockroach bool, logger *
 		if errors.Is(err, migrate.ErrNoChange) {
 			logger.Info("postgres: no pending migrations")
 		} else {
+			// Release the driver's pooled conn, or pool.Close() blocks forever and hides err.
+			m.Close()
 			return fmt.Errorf("postgres: run migrations: %w", err)
 		}
 	} else {
