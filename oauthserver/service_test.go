@@ -148,6 +148,8 @@ func (f *fakeConsentStore) Consume(_ context.Context, consentID string) (Consent
 const (
 	testRedirectURI        = "http://localhost:9090/callback"
 	testPartnerRedirectURI = "http://localhost:9091/callback"
+	// registered without a port; the app binds a random one per sign-in
+	testLoopbackRedirectURI = "http://127.0.0.1/callback"
 
 	// testVerifier stands in for a real client's randomly-generated PKCE
 	// code_verifier — fixed here since tests don't need randomness, just a
@@ -198,6 +200,12 @@ func testService(t *testing.T) (*Service, *authservice.Service) {
 			RedirectURIs:   []string{testPartnerRedirectURI},
 			Scopes:         []string{"read:resource"},
 			RequireConsent: true,
+		},
+		"desktop-app": {
+			ID:           "desktop-app",
+			Public:       true,
+			RedirectURIs: []string{testLoopbackRedirectURI},
+			Scopes:       []string{"read:resource"},
 		},
 	}}
 
@@ -620,5 +628,86 @@ func TestRefreshTokenRejectsBadSecret(t *testing.T) {
 
 	if _, _, err := s.RefreshToken(ctx, "internal-service", "wrong-secret", refresh); err == nil {
 		t.Fatal("RefreshToken with bad secret: expected error, got nil")
+	}
+}
+
+func TestPublicClientRoundtripWithLoopbackPort(t *testing.T) {
+	s, _ := testService(t)
+	ctx := context.Background()
+
+	redirect := "http://127.0.0.1:53817/callback"
+
+	result, err := s.Authorize(ctx, "desktop-app", redirect, "read:resource", "xyz", "user-alice", testChallenge, "S256")
+	if err != nil {
+		t.Fatalf("Authorize: %v", err)
+	}
+
+	code := extractCode(t, result.RedirectURL)
+
+	_, refresh, err := s.Exchange(ctx, "desktop-app", "", code, redirect, testVerifier)
+	if err != nil {
+		t.Fatalf("Exchange: %v", err)
+	}
+
+	if _, _, err := s.RefreshToken(ctx, "desktop-app", "", refresh); err != nil {
+		t.Fatalf("RefreshToken: %v", err)
+	}
+}
+
+func TestPublicClientRejectsSecretAndClientCredentials(t *testing.T) {
+	s, _ := testService(t)
+	ctx := context.Background()
+
+	result, err := s.Authorize(ctx, "desktop-app", "http://127.0.0.1:1234/callback", "read:resource", "xyz", "user-alice", testChallenge, "S256")
+	if err != nil {
+		t.Fatalf("Authorize: %v", err)
+	}
+
+	code := extractCode(t, result.RedirectURL)
+
+	if _, _, err := s.Exchange(ctx, "desktop-app", "anything", code, "http://127.0.0.1:1234/callback", testVerifier); err == nil {
+		t.Error("Exchange with a secret for a Public client: expected error, got nil")
+	}
+
+	if _, err := s.ClientCredentials(ctx, "desktop-app", "", "read:resource"); err == nil {
+		t.Error("ClientCredentials for a Public client: expected error, got nil")
+	}
+}
+
+func TestExchangeRejectsEmptySecretForConfidentialClient(t *testing.T) {
+	s, _ := testService(t)
+	ctx := context.Background()
+
+	result, err := s.Authorize(ctx, "internal-service", testRedirectURI, "read:resource", "xyz", "user-alice", testChallenge, "S256")
+	if err != nil {
+		t.Fatalf("Authorize: %v", err)
+	}
+
+	if _, _, err := s.Exchange(ctx, "internal-service", "", extractCode(t, result.RedirectURL), testRedirectURI, testVerifier); err == nil {
+		t.Fatal("Exchange with empty secret: expected error, got nil")
+	}
+}
+
+func TestRedirectURIAllowed(t *testing.T) {
+	c := Client{RedirectURIs: []string{"http://127.0.0.1/callback", "http://localhost:9090/cb", "https://app.example/cb"}}
+
+	cases := map[string]bool{
+		"http://127.0.0.1/callback":           true,
+		"http://127.0.0.1:5000/callback":      true,
+		"http://127.0.0.1:5000/other":         false,
+		"http://127.0.0.1:5000/callback?x=1":  false,
+		"http://[::1]:5000/callback":          false, // different loopback host than registered
+		"https://127.0.0.1:5000/callback":     false,
+		"http://localhost:9090/cb":            true,  // exact match still works
+		"http://localhost:9999/cb":            false, // localhost is not port-agnostic
+		"https://app.example/cb":              true,
+		"https://app.example:8443/cb":         false,
+		"http://evil@127.0.0.1:5000/callback": false,
+	}
+
+	for uri, want := range cases {
+		if got := redirectURIAllowed(c, uri); got != want {
+			t.Errorf("redirectURIAllowed(%q) = %v, want %v", uri, got, want)
+		}
 	}
 }

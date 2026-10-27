@@ -1,8 +1,8 @@
 // Package oauthserver implements the OAuth2 Authorization Code grant
-// (RFC 6749 §4.1), Client Credentials grant (RFC 6749 §4.4), and refreshing
-// a delegated access token (RFC 6749 §6) for internal, confidential
-// clients: no PKCE (clients hold a client_secret),
-// no dynamic client registration (ClientStore is expected to be a small
+// (RFC 6749 §4.1) with mandatory PKCE, Client Credentials grant (RFC 6749
+// §4.4), and refreshing a delegated access token (RFC 6749 §6), for
+// confidential clients (hold a client_secret) and Public native clients
+// (PKCE only, loopback redirect per RFC 8252): no dynamic client registration (ClientStore is expected to be a small
 // static list). Token issuance itself is delegated to a TokenIssuer
 // (authservice.Service satisfies it).
 //
@@ -20,7 +20,6 @@ package oauthserver
 import (
 	"context"
 	"fmt"
-	"slices"
 	"time"
 
 	"github.com/manhrev/mkit/error/serviceerr"
@@ -72,7 +71,7 @@ func (s *Service) Authorize(ctx context.Context, clientID, redirectURI, scope, s
 		return AuthorizeResult{}, serviceerr.NewInvalidArgument(err).SetMessage("Unknown client_id.")
 	}
 
-	if !slices.Contains(client.RedirectURIs, redirectURI) {
+	if !redirectURIAllowed(client, redirectURI) {
 		// Deliberately NOT redirecting on this error — redirecting to an
 		// unregistered URI is exactly the open-redirect this check exists
 		// to prevent.
@@ -173,12 +172,12 @@ func (s *Service) grant(ctx context.Context, clientID, redirectURI, scope, state
 	return redirectURI + "?code=" + code + "&state=" + state, nil
 }
 
-// Exchange validates client credentials + the code + PKCE code_verifier,
+// Exchange validates client credentials (none for a Public client) + the code + PKCE code_verifier,
 // consumes the code (single use), and issues an access+refresh pair for
 // the code's user.
 func (s *Service) Exchange(ctx context.Context, clientID, clientSecret, code, redirectURI, codeVerifier string) (access, refresh string, err error) {
 	client, err := s.clients.Get(ctx, clientID)
-	if err != nil || client.Secret != clientSecret {
+	if err != nil || !checkSecret(client, clientSecret) {
 		return "", "", serviceerr.NewUnauthenticated(fmt.Errorf("invalid client credentials")).
 			SetMessage("Invalid client_id or client_secret.")
 	}
@@ -216,7 +215,8 @@ func (s *Service) Exchange(ctx context.Context, clientID, clientSecret, code, re
 // For machine-to-machine callers where there's no user to act on behalf of.
 func (s *Service) ClientCredentials(ctx context.Context, clientID, clientSecret, scope string) (access string, err error) {
 	client, err := s.clients.Get(ctx, clientID)
-	if err != nil || client.Secret != clientSecret {
+	// A Public client has no secret, so it can't prove it is itself.
+	if err != nil || client.Public || !checkSecret(client, clientSecret) {
 		return "", serviceerr.NewUnauthenticated(fmt.Errorf("invalid client credentials")).
 			SetMessage("Invalid client_id or client_secret.")
 	}
@@ -231,10 +231,11 @@ func (s *Service) ClientCredentials(ctx context.Context, clientID, clientSecret,
 // RefreshToken implements RFC 6749 §6 (Refreshing an Access Token) for a
 // delegated refresh token issued by Exchange: the client re-authenticates
 // with its client_secret, gets back a rotated access+refresh pair carrying
-// the same client/scope as before — never more.
+// the same client/scope as before — never more. A Public client sends an
+// empty clientSecret.
 func (s *Service) RefreshToken(ctx context.Context, clientID, clientSecret, refreshToken string) (access, refresh string, err error) {
 	client, err := s.clients.Get(ctx, clientID)
-	if err != nil || client.Secret != clientSecret {
+	if err != nil || !checkSecret(client, clientSecret) {
 		return "", "", serviceerr.NewUnauthenticated(fmt.Errorf("invalid client credentials")).
 			SetMessage("Invalid client_id or client_secret.")
 	}
