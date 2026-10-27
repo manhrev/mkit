@@ -13,6 +13,7 @@ import (
 type Service struct {
 	privateKey           ed25519.PrivateKey
 	publicKey            ed25519.PublicKey
+	kid                  string
 	accessTokenDuration  time.Duration
 	refreshTokenDuration time.Duration
 	issuer               string
@@ -31,6 +32,7 @@ func New(privateKey ed25519.PrivateKey, publicKey ed25519.PublicKey, cfg Config)
 	return &Service{
 		privateKey:           privateKey,
 		publicKey:            publicKey,
+		kid:                  keyID(publicKey),
 		accessTokenDuration:  cfg.AccessTokenDuration,
 		refreshTokenDuration: cfg.RefreshTokenDuration,
 		issuer:               cfg.Issuer,
@@ -116,6 +118,7 @@ func (s *Service) generate(subject string, tokenType TokenType, opts ...ClaimOpt
 	}
 
 	token := jwt.NewWithClaims(jwt.SigningMethodEdDSA, claims)
+	token.Header["kid"] = s.kid // lets a JWKS verifier pick the key once more than one is published
 
 	signed, err := token.SignedString(s.privateKey)
 	if err != nil {

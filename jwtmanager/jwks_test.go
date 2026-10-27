@@ -3,6 +3,8 @@ package jwtmanager
 import (
 	"encoding/base64"
 	"testing"
+
+	"github.com/golang-jwt/jwt/v5"
 )
 
 func TestJWKS(t *testing.T) {
@@ -43,5 +45,23 @@ func TestJWKS(t *testing.T) {
 
 	if again := s.JWKS().Keys[0].Kid; again != key.Kid {
 		t.Errorf("Kid is not deterministic: %q then %q", key.Kid, again)
+	}
+}
+
+func TestTokenKidMatchesJWKS(t *testing.T) {
+	s := testService(t)
+
+	token, err := s.GenerateAccessToken("user-1", nil)
+	if err != nil {
+		t.Fatalf("GenerateAccessToken: %v", err)
+	}
+
+	parsed, _, err := jwt.NewParser().ParseUnverified(token, &Claims{})
+	if err != nil {
+		t.Fatalf("ParseUnverified: %v", err)
+	}
+
+	if got, want := parsed.Header["kid"], s.JWKS().Keys[0].Kid; got != want {
+		t.Errorf("token kid = %v, want JWKS kid %q", got, want)
 	}
 }
