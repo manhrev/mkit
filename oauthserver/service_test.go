@@ -45,7 +45,7 @@ func (f *fakeRefreshStore) Save(_ context.Context, jti, userID string, _ time.Ti
 	return nil
 }
 
-func (f *fakeRefreshStore) Get(_ context.Context, jti string) (string, error) {
+func (f *fakeRefreshStore) Consume(_ context.Context, jti string) (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
@@ -53,6 +53,7 @@ func (f *fakeRefreshStore) Get(_ context.Context, jti string) (string, error) {
 	if !ok {
 		return "", errors.New("not found")
 	}
+	delete(f.records, jti)
 
 	return userID, nil
 }

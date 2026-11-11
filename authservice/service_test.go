@@ -48,7 +48,7 @@ func (f *fakeStore) Save(_ context.Context, jti, userID string, _ time.Time) err
 	return nil
 }
 
-func (f *fakeStore) Get(_ context.Context, jti string) (string, error) {
+func (f *fakeStore) Consume(_ context.Context, jti string) (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
@@ -56,6 +56,7 @@ func (f *fakeStore) Get(_ context.Context, jti string) (string, error) {
 	if !ok {
 		return "", errors.New("not found")
 	}
+	delete(f.records, jti)
 
 	return userID, nil
 }
@@ -210,6 +211,39 @@ func TestRefreshRotates(t *testing.T) {
 	// new refresh token must still work
 	if _, _, err := s.Refresh(ctx, refresh2); err != nil {
 		t.Fatalf("Refresh with rotated token: %v", err)
+	}
+}
+
+// Two concurrent refreshes with one token: exactly one wins.
+func TestRefreshConcurrentSingleUse(t *testing.T) {
+	s := testAuthService(t)
+	ctx := context.Background()
+
+	_, refresh, err := s.Login(ctx, "alice", "hunter2")
+	if err != nil {
+		t.Fatalf("Login: %v", err)
+	}
+
+	const n = 8
+	errs := make(chan error, n)
+	var wg sync.WaitGroup
+	for range n {
+		wg.Go(func() {
+			_, _, err := s.Refresh(ctx, refresh)
+			errs <- err
+		})
+	}
+	wg.Wait()
+	close(errs)
+
+	ok := 0
+	for err := range errs {
+		if err == nil {
+			ok++
+		}
+	}
+	if ok != 1 {
+		t.Fatalf("%d of %d concurrent refreshes succeeded, want 1", ok, n)
 	}
 }
 

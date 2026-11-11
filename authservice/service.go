@@ -24,8 +24,10 @@ type UserLookup interface {
 // can be rotated (old jti deleted, new jti saved) or revoked.
 type RefreshTokenStore interface {
 	Save(ctx context.Context, jti, userID string, expiresAt time.Time) error
-	// Get returns the stored userID for jti, or an error if absent/expired/revoked.
-	Get(ctx context.Context, jti string) (userID string, err error)
+	// Consume deletes jti's record and returns its userID in one statement
+	// (DELETE ... RETURNING), so two concurrent refreshes with one token
+	// can't both succeed. Error if absent/expired/revoked.
+	Consume(ctx context.Context, jti string) (userID string, err error)
 	Delete(ctx context.Context, jti string) error
 }
 
@@ -199,24 +201,21 @@ func (s *Service) RefreshForClient(ctx context.Context, clientID, refreshToken s
 	return s.issue(ctx, claims.Subject, nil, jwtmanager.WithDelegation(claims.ClientID, claims.Scope))
 }
 
-// consumeRefreshRecord single-uses (deletes) claims' store record after
-// confirming it matches — the store bookkeeping shared by Refresh and
+// consumeRefreshRecord single-uses (atomically deletes) claims' store
+// record, then confirms it matched — the store bookkeeping shared by Refresh and
 // RefreshForClient. Call only after a caller's own gate check (delegated
 // vs. not, clientID match), so a wrongly-routed token isn't burned before
 // being rejected.
 func (s *Service) consumeRefreshRecord(ctx context.Context, claims *jwtmanager.Claims) error {
-	storedUserID, err := s.store.Get(ctx, claims.ID)
+	storedUserID, err := s.store.Consume(ctx, claims.ID)
 	if err != nil {
 		return serviceerr.NewUnauthenticated(err).SetMessage("Refresh token not recognized.")
 	}
 
+	// the record is already gone here: a mismatched token stays burned
 	if storedUserID != claims.Subject {
 		return serviceerr.NewUnauthenticated(fmt.Errorf("refresh token subject mismatch")).
 			SetMessage("Refresh token not recognized.")
-	}
-
-	if err := s.store.Delete(ctx, claims.ID); err != nil {
-		return serviceerr.NewInternal(err)
 	}
 
 	return nil
