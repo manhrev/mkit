@@ -132,6 +132,12 @@ func (w *statusWriter) WriteHeader(status int) {
 	w.ResponseWriter.WriteHeader(status)
 }
 
+// Unwrap lets http.ResponseController reach the underlying writer's
+// Flush/Hijack/SetDeadline through Logger.
+func (w *statusWriter) Unwrap() http.ResponseWriter {
+	return w.ResponseWriter
+}
+
 // CORS allows the given origins (["*"] allows any origin) and answers
 // preflight OPTIONS requests directly.
 //
@@ -142,15 +148,17 @@ func CORS(allowedOrigins []string) func(http.Handler) http.Handler {
 
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// the response depends on Origin even when it's refused, so caches must key on it
+			w.Header().Add("Vary", "Origin")
 			origin := r.Header.Get("Origin")
 			if origin != "" && (allowAny || slices.ContainsFunc(allowedOrigins, func(o string) bool { return strings.EqualFold(o, origin) })) {
 				w.Header().Set("Access-Control-Allow-Origin", origin)
-				w.Header().Set("Vary", "Origin")
 			}
 
 			if r.Method == http.MethodOptions {
 				w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
 				w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+				w.Header().Set("Access-Control-Max-Age", "600")
 				w.WriteHeader(http.StatusNoContent)
 				return
 			}
