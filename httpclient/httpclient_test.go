@@ -2,6 +2,7 @@ package httpclient
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -39,7 +40,7 @@ func TestSend(t *testing.T) {
 
 	ctx, span := otel.Tracer("test").Start(context.Background(), "parent")
 	defer span.End()
-	c := NewClient(nil)
+	c := NewClient()
 
 	res, err := c.Req().SetBody(map[string]string{"a": "b"}).Post[pong](ctx, srv.URL+"/ok")
 	if err != nil || res.StatusCode != 200 || res.Body.Msg != "hi" {
@@ -63,6 +64,22 @@ func TestSend(t *testing.T) {
 	}
 }
 
+func TestMaxBodySize(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`"0123456789"`)) // 12 bytes
+	}))
+	defer srv.Close()
+
+	at := NewClient(WithMaxBodySize(12))
+	if _, err := at.Req().Get[string](context.Background(), srv.URL); err != nil {
+		t.Fatalf("body == limit: %v", err)
+	}
+
+	if _, err := at.Req().SetMaxBodySize(11).Get[string](context.Background(), srv.URL); !errors.Is(err, ErrResponseTooLarge) {
+		t.Fatalf("body > limit: err = %v, want ErrResponseTooLarge", err)
+	}
+}
+
 // A retried POST must resend its body; exhausting retries on 503 returns
 // the last response, not an error (or a nil response).
 func TestRetryPost(t *testing.T) {
@@ -76,7 +93,7 @@ func TestRetryPost(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	res, err := NewClient(nil).Req().SetBody("x").SetRetry(2).Post[struct{}](context.Background(), srv.URL)
+	res, err := NewClient().Req().SetBody("x").SetRetry(2).Post[struct{}](context.Background(), srv.URL)
 	if err != nil || res.StatusCode != 503 || calls != 2 {
 		t.Fatalf("res=%+v err=%v calls=%d", res, err, calls)
 	}

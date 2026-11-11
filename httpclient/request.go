@@ -25,6 +25,7 @@ type Request struct {
 	requestBody any
 	timeout     time.Duration
 	retryCount  int
+	maxBodySize int64
 }
 
 // SetBody marshals body as the JSON request body and sets Content-Type.
@@ -74,6 +75,14 @@ func (r *Request) SetTimeout(timeout time.Duration) *Request {
 // retries — it does not mean "unlimited" (unlike retry-go's own default).
 func (r *Request) SetRetry(retryCount int) *Request {
 	r.retryCount = retryCount
+
+	return r
+}
+
+// SetMaxBodySize overrides the client's default cap on response body bytes
+// read; a larger body fails with ErrResponseTooLarge.
+func (r *Request) SetMaxBodySize(maxBodySize int64) *Request {
+	r.maxBodySize = maxBodySize
 
 	return r
 }

@@ -14,7 +14,9 @@ import (
 )
 
 // Post executes the request as an HTTP POST, decoding a 2xx JSON response
-// body into T. Use struct{} when the body doesn't matter.
+// body into T. Use struct{} when the body doesn't matter. Like Get, a POST
+// is replayed on a retryable failure (see doWithRetry), so pass SetRetry(0)
+// for a non-idempotent call.
 func (r *Request) Post[T any](ctx context.Context, url string) (*Response[T], error) {
 	return send[T](ctx, r, url, http.MethodPost)
 }
@@ -103,12 +105,16 @@ func (r *Request) doHTTP(ctx context.Context, url string, method string) (*http.
 	}
 	defer res.Body.Close()
 
-	raw, err := io.ReadAll(res.Body)
+	// read one byte past the cap to tell "exactly max" from "too large"
+	raw, err := io.ReadAll(io.LimitReader(res.Body, r.maxBodySize+1))
 	if err != nil {
 		if errors.Is(err, context.DeadlineExceeded) {
 			return nil, nil, ErrRequestTimeout
 		}
 		return nil, nil, fmt.Errorf("failed to read response body: %w", err)
+	}
+	if int64(len(raw)) > r.maxBodySize {
+		return nil, nil, fmt.Errorf("%w: limit %d bytes", ErrResponseTooLarge, r.maxBodySize)
 	}
 
 	return res, raw, nil

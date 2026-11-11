@@ -12,42 +12,62 @@ import (
 )
 
 const (
-	defaultTimeout    = 30 * time.Second
-	defaultRetryCount = 3
+	defaultTimeout     = 30 * time.Second
+	defaultRetryCount  = 3
+	defaultMaxBodySize = 10 << 20 // 10 MiB
 )
 
 type Client struct {
-	client *http.Client
-	config *Config
+	client      *http.Client
+	timeout     time.Duration
+	retryCount  int
+	maxBodySize int64
 }
 
-// NewClient builds a Client. A nil cfg, or a zero-value DefaultTimeout /
-// DefaultRetryCount within it, falls back to package defaults — in
-// particular DefaultRetryCount must not be left at its zero value, since
-// retry-go treats retry.Attempts(0) as "retry forever", not "no retries".
-func NewClient(cfg *Config) *Client {
-	if cfg == nil {
-		cfg = &Config{}
-	}
-	if cfg.DefaultTimeout == 0 {
-		cfg.DefaultTimeout = defaultTimeout
-	}
-	if cfg.DefaultRetryCount == 0 {
-		cfg.DefaultRetryCount = defaultRetryCount
-	}
+// Option sets one of a Client's defaults, which every Request built via
+// Client.Req starts from.
+type Option func(*Client)
 
+// WithTimeout sets the default per-request timeout (default 30s); see
+// Request.SetTimeout.
+func WithTimeout(timeout time.Duration) Option {
+	return func(c *Client) { c.timeout = timeout }
+}
+
+// WithRetry sets the default retry count (default 3). <= 0 means no
+// retries; see Request.SetRetry.
+func WithRetry(retryCount int) Option {
+	return func(c *Client) { c.retryCount = retryCount }
+}
+
+// WithMaxBodySize caps how many response body bytes are read (default
+// 10 MiB); a larger body fails with ErrResponseTooLarge. See
+// Request.SetMaxBodySize.
+func WithMaxBodySize(maxBodySize int64) Option {
+	return func(c *Client) { c.maxBodySize = maxBodySize }
+}
+
+// NewClient builds a Client with the package defaults, changed by opts.
+func NewClient(opts ...Option) *Client {
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	// customize transport here (connection pool size, TLS, ...) if needed;
 	// starting from DefaultTransport keeps its proxy/dial/idle-conn defaults.
 
-	return &Client{
+	c := &Client{
 		client: &http.Client{
 			// one client span per attempt, with traceparent injected via the
 			// global propagator (no-op until tracing.NewService sets it)
 			Transport: otelhttp.NewTransport(transport),
 		},
-		config: cfg,
+		timeout:     defaultTimeout,
+		retryCount:  defaultRetryCount,
+		maxBodySize: defaultMaxBodySize,
 	}
+	for _, opt := range opts {
+		opt(c)
+	}
+
+	return c
 }
 
 // Req starts a new request builder seeded with this client's defaults.
@@ -56,8 +76,9 @@ func (c *Client) Req() *Request {
 		headers:     make(map[string][]string),
 		queries:     make(map[string]string),
 		client:      c,
-		timeout:     c.config.DefaultTimeout,
-		retryCount:  c.config.DefaultRetryCount,
+		timeout:     c.timeout,
+		retryCount:  c.retryCount,
+		maxBodySize: c.maxBodySize,
 		requestBody: nil,
 	}
 }
