@@ -15,8 +15,9 @@ type App struct {
 	GRPC        *GRPC
 	Log         *Log
 	Tracing     Tracing
-	Minio       *Minio
+	S3          *S3
 	GCS         *GCS
+	LocalBucket *LocalBucket
 	RabbitMQ    *RabbitMQ
 	JWT         *JWT
 }
@@ -87,16 +88,18 @@ type GRPCClient struct {
 	Port string
 }
 
-type Minio struct {
-	Host       string `validate:"required,hostname|ip"`
-	Port       int    `validate:"required,gt=0"`
-	AccessKey  string `validate:"required"`
-	SecretKey  string `validate:"required"`
-	BucketName string `validate:"required"`
-	SSLEnabled bool
+// S3 is an S3 API bucket (e.g. Cloudflare R2), see objectstorage/s3store.
+// Objects are served publicly from somewhere else (a custom domain), not
+// from Endpoint.
+type S3 struct {
+	Endpoint        string // R2: https://<account_id>.r2.cloudflarestorage.com
+	Region          string // R2: auto
+	Bucket          string
+	AccessKeyID     string
+	SecretAccessKey string
 }
 
-// GCS is a Google Cloud Storage default bucket. Credentials come from
+// GCS is a Google Cloud Storage bucket, see objectstorage/gcsstore. Credentials come from
 // CredentialsFile when set, else Application Default Credentials (the
 // runtime service account on Cloud Run, `gcloud auth application-default
 // login` locally).
@@ -108,6 +111,13 @@ type GCS struct {
 	// it). Empty = detect it from the credentials, which works with a key
 	// file or on Cloud Run/GCE, not with user ADC.
 	SignerEmail string
+}
+
+// LocalBucket is a dev-only bucket on local disk, see
+// objectstorage/localbucket.
+type LocalBucket struct {
+	Dir string // where objects are stored, created if missing
+	URL string // public URL the API serves them under, e.g. http://localhost:8080/local-bucket/
 }
 
 type RabbitMQ struct {
