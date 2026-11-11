@@ -144,9 +144,15 @@ func (s *Service) GenerateRefreshToken(subject string, opts ...ClaimOption) (str
 func (s *Service) Verify(tokenString string, wantType TokenType) (*Claims, error) {
 	claims := &Claims{}
 
+	// no audience check: delegated tokens carry aud = client id on purpose
+	opts := []jwt.ParserOption{jwt.WithValidMethods([]string{"EdDSA"}), jwt.WithExpirationRequired()}
+	if s.issuer != "" {
+		opts = append(opts, jwt.WithIssuer(s.issuer))
+	}
+
 	_, err := jwt.ParseWithClaims(tokenString, claims, func(*jwt.Token) (any, error) {
 		return s.publicKey, nil
-	}, jwt.WithValidMethods([]string{"EdDSA"}))
+	}, opts...)
 	if err != nil {
 		if errors.Is(err, jwt.ErrTokenSignatureInvalid) {
 			return nil, fmt.Errorf("invalid token signature: %w", err)

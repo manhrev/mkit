@@ -240,6 +240,25 @@ func TestAlgNoneRejected(t *testing.T) {
 	}
 }
 
+func TestMissingExpOrWrongIssuerRejected(t *testing.T) {
+	s := testService(t)
+
+	cases := map[string]ClaimOption{
+		"no exp":       func(c *Claims) { c.ExpiresAt = nil },
+		"wrong issuer": func(c *Claims) { c.Issuer = "someone-else" },
+	}
+	for name, opt := range cases {
+		tok, err := s.generate("user-1", TokenTypeAccess, opt)
+		if err != nil {
+			t.Fatalf("%s: generate: %v", name, err)
+		}
+
+		if _, err := s.Verify(tok, TokenTypeAccess); err == nil {
+			t.Errorf("%s: Verify: expected error, got nil", name)
+		}
+	}
+}
+
 func TestExpiredTokenRejected(t *testing.T) {
 	s := testService(t)
 
