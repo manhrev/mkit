@@ -5,10 +5,13 @@ import (
 	"time"
 )
 
+// App is the config shared by every service. Environment, Timezone and
+// Version are required. Requirements in these comments are documented, not
+// checked: each caller validates what it uses.
 type App struct {
-	Environment enum.Environment `validate:"required"`
-	Timezone    string           `validate:"required"`
-	Version     string           `validate:"required"`
+	Environment enum.Environment
+	Timezone    string
+	Version     string
 	Postgres    *Postgres
 	Redis       *Redis
 	HTTP        *HTTP
@@ -22,8 +25,9 @@ type App struct {
 	JWT         *JWT
 }
 
+// Postgres: ConnectionParams is required; MaxOpenConn and MaxIdleConn must be > 0.
 type Postgres struct {
-	ConnectionParams *PostgresConnectionParams `validate:"required"`
+	ConnectionParams *PostgresConnectionParams
 	IsMigrateSchema  bool
 	// IsCockroach migrates with golang-migrate's cockroachdb driver (lock
 	// row in schema_lock): CockroachDB has no pg_advisory_lock, which the
@@ -33,37 +37,42 @@ type Postgres struct {
 	// HTTP port first and ping later. The caller must then ping itself and
 	// treat failure as fatal; otherwise a bad DSN only shows on first query.
 	SkipPing    bool
-	MaxOpenConn int `validate:"required,gt=0"`
-	MaxIdleConn int `validate:"required,gt=0"`
+	MaxOpenConn int
+	MaxIdleConn int
 }
 
+// PostgresConnectionParams: every field is required. Host is a hostname or
+// IP, Port > 0, SSLMode is disable, require or verify-full.
 type PostgresConnectionParams struct {
-	Host     string `validate:"required,hostname|ip"`
-	Port     int    `validate:"required,gt=0"`
-	User     string `validate:"required"`
-	Password string `validate:"required"`
-	DBName   string `validate:"required"`
-	SSLMode  string `validate:"required,oneof=disable require verify-full"`
+	Host     string
+	Port     int
+	User     string
+	Password string
+	DBName   string
+	SSLMode  string
 }
 
+// Redis: Host (hostname or IP) is required.
 type Redis struct {
-	Host     string `validate:"required,hostname|ip"`
+	Host     string
 	Port     string
 	Password string
 	DB       int
 }
 
+// GRPC: Host (hostname or IP) and Port are required.
 type GRPC struct {
-	Host                 string `validate:"required,hostname|ip"`
-	Port                 string `validate:"required,gt=0"`
+	Host                 string
+	Port                 string
 	MaxConnectionAge     string
 	ReflectionEnabled    bool
 	JsonTranscodeEnabled bool
 }
 
+// HTTP: Host (hostname or IP) and Port are required.
 type HTTP struct {
-	Host string `validate:"required,hostname|ip"`
-	Port string `validate:"required,gt=0"`
+	Host string
+	Port string
 }
 
 type Tracing struct {
@@ -78,9 +87,10 @@ type Tracing struct {
 	Log      bool
 }
 
+// Log: both fields are required; Level is error, warn, info or debug.
 type Log struct {
-	Level       string `validate:"required,oneof=error warn info debug"`
-	LogFilePath string `validate:"required"`
+	Level       string
+	LogFilePath string
 }
 
 type GRPCClient struct {
@@ -102,9 +112,9 @@ type S3 struct {
 // GCS is a Google Cloud Storage bucket, see objectstorage/gcsstore. Credentials come from
 // CredentialsFile when set, else Application Default Credentials (the
 // runtime service account on Cloud Run, `gcloud auth application-default
-// login` locally).
+// login` locally). BucketName is required.
 type GCS struct {
-	BucketName      string `validate:"required"`
+	BucketName      string
 	CredentialsFile string
 	// SignerEmail is the service account signed URLs are signed as, through
 	// the IAM Credentials signBlob API (needs iam.serviceAccounts.signBlob on
@@ -120,16 +130,18 @@ type LocalBucket struct {
 	URL string // public URL the API serves them under, e.g. http://localhost:8080/local-bucket/
 }
 
+// RabbitMQ: every field is required. Host is a hostname or IP, Port > 0.
 type RabbitMQ struct {
-	Host     string `validate:"required,hostname|ip"`
-	Port     int    `validate:"required,gt=0"`
-	User     string `validate:"required"`
-	Password string `validate:"required"`
+	Host     string
+	Port     int
+	User     string
+	Password string
 }
 
+// JWT: PrivateKeyFile and PublicKeyFile are required.
 type JWT struct {
-	PrivateKeyFile       string `validate:"required"`
-	PublicKeyFile        string `validate:"required"`
+	PrivateKeyFile       string
+	PublicKeyFile        string
 	AccessTokenDuration  time.Duration
 	RefreshTokenDuration time.Duration
 	Issuer               string
