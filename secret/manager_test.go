@@ -70,16 +70,23 @@ func TestFromEnv(t *testing.T) {
 	const name = "projects/p/secrets/s/versions/latest"
 	t.Setenv(EnvGCPName, name)
 
-	t.Setenv(EnvEnabled, "")
-	if p := FromEnv(); p != nil {
-		t.Fatalf("want nil when disabled, got %v", p)
+	for _, off := range []string{"", "false", "0"} {
+		t.Setenv(EnvEnabled, off)
+		if p, err := FromEnv(); p != nil || err != nil {
+			t.Fatalf("%s=%q: want nil, nil, got %v, %v", EnvEnabled, off, p, err)
+		}
+	}
+	t.Setenv(EnvEnabled, "yes")
+	if p, err := FromEnv(); p != nil || err == nil {
+		t.Fatalf("want error for bad bool, got %v, %v", p, err)
 	}
 	t.Setenv(EnvEnabled, "true")
-	if p, ok := FromEnv().(GCP); !ok || p.Name != name {
-		t.Fatalf("want GCP provider, got %v", p)
+	p, err := FromEnv()
+	if g, ok := p.(GCP); err != nil || !ok || g.Name != name {
+		t.Fatalf("want GCP provider, got %v, %v", p, err)
 	}
 	t.Setenv(EnvGCPName, "")
-	if p := FromEnv(); p != nil {
-		t.Fatalf("want nil without provider config, got %v", p)
+	if p, err := FromEnv(); p != nil || err == nil {
+		t.Fatalf("want error without provider config, got %v, %v", p, err)
 	}
 }

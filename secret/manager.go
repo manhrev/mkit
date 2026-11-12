@@ -41,16 +41,26 @@ const (
 )
 
 // FromEnv returns the provider the environment asks for, or nil when secret
-// loading is off or no provider is configured. Its settings are plain env
-// vars: they say where the secrets are, so they can't live inside them.
-func FromEnv() Provider {
-	if on, _ := strconv.ParseBool(os.Getenv(EnvEnabled)); !on {
-		return nil
+// loading is off (EnvEnabled unset or empty). An EnvEnabled that is not a
+// bool, or loading turned on with no provider configured, is an error: either
+// would silently skip the secrets. Its settings are plain env vars: they say
+// where the secrets are, so they can't live inside them.
+func FromEnv() (Provider, error) {
+	v := os.Getenv(EnvEnabled)
+	if v == "" {
+		return nil, nil
+	}
+	on, err := strconv.ParseBool(v)
+	if err != nil {
+		return nil, fmt.Errorf("secret: %s: invalid value", EnvEnabled)
+	}
+	if !on {
+		return nil, nil
 	}
 	if n := os.Getenv(EnvGCPName); n != "" {
-		return GCP{Name: n}
+		return GCP{Name: n}, nil
 	}
-	return nil
+	return nil, fmt.Errorf("secret: %s is on but no provider is configured (set %s)", EnvEnabled, EnvGCPName)
 }
 
 // ParseDotenv parses KEY=value text (comments, quotes and multi-line quoted
